@@ -19,20 +19,14 @@ dclient.refresh()
 
 
 def make_menu(heading: str, choices: list[urwid.WidgetWrap]):
-    line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
+    header = urwid.AttrMap(urwid.Text(["\n ", heading]), "heading")
+
     listbox = urwid.ListBox(
-        urwid.SimpleFocusListWalker(
-            [
-                urwid.AttrMap(urwid.Text(["\n ", heading]), "heading"),
-                urwid.AttrMap(line, "line"),
-                urwid.Divider(),
-            ]
-            + choices
-            + [urwid.Divider()]
-        )
+        urwid.SimpleFocusListWalker(choices)
     )
     menu = urwid.AttrMap(listbox, "options")
-    return menu
+    frame = urwid.Frame(menu, header)
+    return frame
 
 
 class MenuButton(urwid.Button):

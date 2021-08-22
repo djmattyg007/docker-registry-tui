@@ -1,9 +1,27 @@
+import os
+import weakref
+
+from docker_registry_client import DockerRegistryClient
+from docker_registry_client.Repository import RepositoryV2
+from dotenv import load_dotenv
 import urwid
+
+
+load_dotenv()
+
+
+dclient = DockerRegistryClient(
+    host="https://" + os.getenv("REGISTRY_HOSTNAME"),
+    username=os.getenv("REGISTRY_USERNAME"),
+    password=os.getenv("REGISTRY_PASSWORD"),
+)
+dclient.refresh()
 
 
 class MenuButton(urwid.Button):
     def __init__(self, caption, callback):
         super().__init__("")
+
         urwid.connect_signal(self, "click", callback)
         self._w = urwid.AttrMap(
             urwid.SelectableIcon(["  \N{BULLET} ", caption], 2),
@@ -17,6 +35,7 @@ class SubMenu(urwid.WidgetWrap):
         super().__init__(
             MenuButton([caption, "\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
         )
+
         line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
         listbox = urwid.ListBox(
             urwid.SimpleFocusListWalker(
@@ -35,50 +54,111 @@ class SubMenu(urwid.WidgetWrap):
         top.open_box(self.menu)
 
 
-class Choice(urwid.WidgetWrap):
-    def __init__(self, caption):
-        super().__init__(MenuButton(caption, self.item_chosen))
-        self.caption = caption
+class TagChoice(urwid.WidgetWrap):
+    def __init__(self, repo: RepositoryV2, tag: str):
+        super().__init__(
+            MenuButton(tag, self.item_chosen)
+        )
+        self.repo = repo
+        self.tag = tag
+        self.menu = None
 
     def item_chosen(self, button):
-        response = urwid.Text(["  You chose ", self.caption, "\n"])
-        done = MenuButton("Ok", exit_program)
-        response_box = urwid.Filler(urwid.Pile([response, done]))
-        top.open_box(urwid.AttrMap(response_box, "options"))
+        manifest, digest = self.repo.manifest(self.tag)
+
+        heading = urwid.AttrMap(urwid.Text(["\n ", self.tag]), "heading")
+        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
+        manifest_display = urwid.Text(str(manifest), wrap=urwid.ANY)
+        digest_display = urwid.Text(str(digest), wrap=urwid.ANY)
+
+        response_box = urwid.Filler(urwid.Pile([
+            heading,
+            urwid.AttrMap(line, "line"),
+            urwid.Divider(),
+            manifest_display,
+            digest_display,
+            urwid.Divider(),
+        ]))
+        top.open_box(response_box)
 
 
-def exit_program(key):
-    raise urwid.ExitMainLoop()
+class RepositoryMenu(urwid.WidgetWrap):
+    def __init__(self, repo: RepositoryV2):
+        super().__init__(
+            MenuButton(repo.name, self.open_menu)
+        )
+        self.repo = repo
+        self.menu = None
+
+    def open_menu(self, button):
+        menu = self.menu
+        if menu:
+            actual_menu = menu()
+            if actual_menu:
+                top.open_box(actual_menu)
+                return
+
+        tags = self.repo.tags()
+        choices = [TagChoice(self.repo, tag) for tag in tags]
+
+        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
+        listbox = urwid.ListBox(
+            urwid.SimpleFocusListWalker(
+                [
+                    urwid.AttrMap(urwid.Text(["\n ", self.repo.name]), "heading"),
+                    urwid.AttrMap(line, "line"),
+                    urwid.Divider(),
+                ]
+                + choices
+                + [urwid.Divider()]
+            )
+        )
+        actual_menu = urwid.AttrMap(listbox, "options")
+
+        self.menu = weakref.ref(actual_menu)
+        top.open_box(actual_menu)
+
+
+class NamespaceMenu(urwid.WidgetWrap):
+    def __init__(self, ns: str):
+        super().__init__(
+            MenuButton(ns, self.open_menu)
+        )
+        self.ns = ns
+        self.menu = None
+
+    def open_menu(self, button):
+        menu = self.menu
+        if menu:
+            actual_menu = menu()
+            if actual_menu:
+                top.open_box(actual_menu)
+                return
+
+        repositories = dclient.repositories(namespace=self.ns)
+        choices = [RepositoryMenu(repo) for repo in repositories.values()]
+
+        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
+        listbox = urwid.ListBox(
+            urwid.SimpleFocusListWalker(
+                [
+                    urwid.AttrMap(urwid.Text(["\n ", self.ns]), "heading"),
+                    urwid.AttrMap(line, "line"),
+                    urwid.Divider(),
+                ]
+                + choices
+                + [urwid.Divider()]
+            )
+        )
+        actual_menu = urwid.AttrMap(listbox, "options")
+
+        self.menu = weakref.ref(actual_menu)
+        top.open_box(actual_menu)
 
 
 menu_top = SubMenu(
-    "Main Menu",
-    [
-        SubMenu(
-            "Applications",
-            [
-                SubMenu(
-                    "Accessories",
-                    [
-                        Choice("Text Editor"),
-                        Choice("Terminal"),
-                    ],
-                ),
-            ],
-        ),
-        SubMenu(
-            "System",
-            [
-                SubMenu(
-                    "Preferences",
-                    [
-                        Choice("Appearance"),
-                    ],
-                ),
-                Choice("Lock Screen"),
-            ],
-        ),
-    ],
+    "Namespaces",
+    [NamespaceMenu(ns) for ns in dclient.namespaces()],
 )
 
 palette = [

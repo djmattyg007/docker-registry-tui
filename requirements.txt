@@ -1,0 +1,2 @@
+docker-registry-client==0.5.2
+urwid==2.1.2

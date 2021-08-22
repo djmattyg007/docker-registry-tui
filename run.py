@@ -6,7 +6,7 @@ class MenuButton(urwid.Button):
         super(MenuButton, self).__init__("")
         urwid.connect_signal(self, "click", callback)
         self._w = urwid.AttrMap(
-            urwid.SelectableIcon([u"  \N{BULLET} ", caption], 2),
+            urwid.SelectableIcon(["  \N{BULLET} ", caption], 2),
             None,
             "selected",
         )
@@ -15,13 +15,13 @@ class MenuButton(urwid.Button):
 class SubMenu(urwid.WidgetWrap):
     def __init__(self, caption, choices):
         super(SubMenu, self).__init__(
-            MenuButton([caption, u"\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
+            MenuButton([caption, "\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
         )
-        line = urwid.Divider(u"\N{LOWER ONE QUARTER BLOCK}")
+        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
         listbox = urwid.ListBox(
             urwid.SimpleFocusListWalker(
                 [
-                    urwid.AttrMap(urwid.Text([u"\n  ", caption]), "heading"),
+                    urwid.AttrMap(urwid.Text(["\n  ", caption]), "heading"),
                     urwid.AttrMap(line, "line"),
                     urwid.Divider(),
                 ]
@@ -41,8 +41,8 @@ class Choice(urwid.WidgetWrap):
         self.caption = caption
 
     def item_chosen(self, button):
-        response = urwid.Text([u"  You chose ", self.caption, u"\n"])
-        done = MenuButton(u"Ok", exit_program)
+        response = urwid.Text(["  You chose ", self.caption, "\n"])
+        done = MenuButton("Ok", exit_program)
         response_box = urwid.Filler(urwid.Pile([response, done]))
         top.open_box(urwid.AttrMap(response_box, "options"))
 
@@ -52,30 +52,30 @@ def exit_program(key):
 
 
 menu_top = SubMenu(
-    u"Main Menu",
+    "Main Menu",
     [
         SubMenu(
-            u"Applications",
+            "Applications",
             [
                 SubMenu(
-                    u"Accessories",
+                    "Accessories",
                     [
-                        Choice(u"Text Editor"),
-                        Choice(u"Terminal"),
+                        Choice("Text Editor"),
+                        Choice("Terminal"),
                     ],
                 ),
             ],
         ),
         SubMenu(
-            u"System",
+            "System",
             [
                 SubMenu(
-                    u"Preferences",
+                    "Preferences",
                     [
-                        Choice(u"Appearance"),
+                        Choice("Appearance"),
                     ],
                 ),
-                Choice(u"Lock Screen"),
+                Choice("Lock Screen"),
             ],
         ),
     ],

@@ -3,7 +3,7 @@ import urwid
 
 class MenuButton(urwid.Button):
     def __init__(self, caption, callback):
-        super(MenuButton, self).__init__("")
+        super().__init__("")
         urwid.connect_signal(self, "click", callback)
         self._w = urwid.AttrMap(
             urwid.SelectableIcon(["  \N{BULLET} ", caption], 2),
@@ -14,7 +14,7 @@ class MenuButton(urwid.Button):
 
 class SubMenu(urwid.WidgetWrap):
     def __init__(self, caption, choices):
-        super(SubMenu, self).__init__(
+        super().__init__(
             MenuButton([caption, "\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
         )
         line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
@@ -37,7 +37,7 @@ class SubMenu(urwid.WidgetWrap):
 
 class Choice(urwid.WidgetWrap):
     def __init__(self, caption):
-        super(Choice, self).__init__(MenuButton(caption, self.item_chosen))
+        super().__init__(MenuButton(caption, self.item_chosen))
         self.caption = caption
 
     def item_chosen(self, button):
@@ -100,7 +100,7 @@ focus_map = {
 
 class HorizontalBoxes(urwid.Columns):
     def __init__(self):
-        super(HorizontalBoxes, self).__init__([], dividechars=1)
+        super().__init__([], dividechars=1)
 
     def open_box(self, box):
         if self.contents:
@@ -113,4 +113,7 @@ class HorizontalBoxes(urwid.Columns):
 
 top = HorizontalBoxes()
 top.open_box(menu_top.menu)
-urwid.MainLoop(urwid.Filler(top, "middle", 10), palette).run()
+try:
+    urwid.MainLoop(urwid.Filler(top, "middle", 10), palette).run()
+except KeyboardInterrupt:
+    pass

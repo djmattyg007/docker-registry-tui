@@ -18,6 +18,23 @@ dclient = DockerRegistryClient(
 dclient.refresh()
 
 
+def make_menu(heading: str, choices: list[urwid.WidgetWrap]):
+    line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
+    listbox = urwid.ListBox(
+        urwid.SimpleFocusListWalker(
+            [
+                urwid.AttrMap(urwid.Text(["\n ", heading]), "heading"),
+                urwid.AttrMap(line, "line"),
+                urwid.Divider(),
+            ]
+            + choices
+            + [urwid.Divider()]
+        )
+    )
+    menu = urwid.AttrMap(listbox, "options")
+    return menu
+
+
 class MenuButton(urwid.Button):
     def __init__(self, caption, callback):
         super().__init__("")
@@ -36,19 +53,7 @@ class SubMenu(urwid.WidgetWrap):
             MenuButton([caption, "\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
         )
 
-        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
-        listbox = urwid.ListBox(
-            urwid.SimpleFocusListWalker(
-                [
-                    urwid.AttrMap(urwid.Text(["\n  ", caption]), "heading"),
-                    urwid.AttrMap(line, "line"),
-                    urwid.Divider(),
-                ]
-                + choices
-                + [urwid.Divider()]
-            )
-        )
-        self.menu = urwid.AttrMap(listbox, "options")
+        self.menu = make_menu(caption, choices)
 
     def open_menu(self, button):
         top.open_box(self.menu)
@@ -85,7 +90,7 @@ class TagChoice(urwid.WidgetWrap):
 class RepositoryMenu(urwid.WidgetWrap):
     def __init__(self, repo: RepositoryV2):
         super().__init__(
-            MenuButton(repo.name, self.open_menu)
+            MenuButton(repo.repository, self.open_menu)
         )
         self.repo = repo
         self.menu = None
@@ -101,20 +106,7 @@ class RepositoryMenu(urwid.WidgetWrap):
         tags = self.repo.tags()
         choices = [TagChoice(self.repo, tag) for tag in tags]
 
-        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
-        listbox = urwid.ListBox(
-            urwid.SimpleFocusListWalker(
-                [
-                    urwid.AttrMap(urwid.Text(["\n ", self.repo.name]), "heading"),
-                    urwid.AttrMap(line, "line"),
-                    urwid.Divider(),
-                ]
-                + choices
-                + [urwid.Divider()]
-            )
-        )
-        actual_menu = urwid.AttrMap(listbox, "options")
-
+        actual_menu = make_menu(self.repo.name, choices)
         self.menu = weakref.ref(actual_menu)
         top.open_box(actual_menu)
 
@@ -138,20 +130,7 @@ class NamespaceMenu(urwid.WidgetWrap):
         repositories = dclient.repositories(namespace=self.ns)
         choices = [RepositoryMenu(repo) for repo in repositories.values()]
 
-        line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
-        listbox = urwid.ListBox(
-            urwid.SimpleFocusListWalker(
-                [
-                    urwid.AttrMap(urwid.Text(["\n ", self.ns]), "heading"),
-                    urwid.AttrMap(line, "line"),
-                    urwid.Divider(),
-                ]
-                + choices
-                + [urwid.Divider()]
-            )
-        )
-        actual_menu = urwid.AttrMap(listbox, "options")
-
+        actual_menu = make_menu(self.ns, choices)
         self.menu = weakref.ref(actual_menu)
         top.open_box(actual_menu)
 

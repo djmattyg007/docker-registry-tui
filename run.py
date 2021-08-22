@@ -1,4 +1,5 @@
 import itertools
+import json
 import os
 import weakref
 
@@ -8,6 +9,8 @@ from dotenv import load_dotenv
 
 import urwid
 from urwid import AttrMap, Columns, Filler, Frame, Pile, Text
+
+from dreg.scrollable import Scrollable
 
 
 load_dotenv()
@@ -52,10 +55,16 @@ def cb(func):
     return wrap
 
 
-def unwrap(widget):
+def unwrap(widget: urwid.Widget) -> urwid.Widget:
     while isinstance(widget, urwid.WidgetDecoration):
         widget = widget.original_widget
     return widget
+
+
+def ppjson(input_json) -> str:
+    if isinstance(input_json, str):
+        input_json = json.loads(input_json)
+    return json.dumps(input_json, indent=2)
 
 
 def make_menu(choices: list[urwid.WidgetWrap]):
@@ -79,7 +88,7 @@ class MenuButton(urwid.Button):
 
         urwid.connect_signal(self, "click", callback)
         self._w = AttrMap(
-            urwid.SelectableIcon(["  \N{BULLET} ", caption], 2),
+            urwid.SelectableIcon([" \N{BULLET} ", caption], 2),
             None,
             "selected",
         )
@@ -97,20 +106,17 @@ class TagChoice(urwid.WidgetWrap):
     def item_chosen(self):
         manifest, digest = self.repo.manifest(self.tag)
 
-        heading = AttrMap(Text(["\n ", self.tag]), "heading")
-        manifest_display = Text(str(manifest), wrap=urwid.ANY)
-        digest_display = Text(str(digest), wrap=urwid.ANY)
+        manifest_pp = ppjson(manifest)
 
-        response_box = Filler(Pile([
-            heading,
-            AttrMap(line, "line"),
-            divider,
-            manifest_display,
-            digest_display,
-            divider,
-        ]))
-        raise urwid.ExitMainLoop()
-        top.open_box(response_box)
+        header: Text = unwrap(display_frame.header)
+        header.set_text(f"{self.repo.name}: {self.tag}")
+
+        digest_display = Text(digest, wrap=urwid.ANY)
+        manifest_display = Text(manifest_pp, wrap=urwid.ANY)
+        display = Pile([digest_display, divider, manifest_display])
+        display_frame.body = Scrollable(display)
+
+        container.focus_position = 1
 
 
 class RepositoryMenu(urwid.WidgetWrap):
@@ -124,7 +130,7 @@ class RepositoryMenu(urwid.WidgetWrap):
     def _open_menu(self, heading: str, menu: Frame):
         tags_frame.body = menu
 
-        header = unwrap(tags_frame.header)
+        header: ChangingText = unwrap(tags_frame.header)
         header.change_heading(heading)
 
         footer = unwrap(tags_frame.footer)
@@ -187,8 +193,6 @@ class NamespaceMenu(urwid.WidgetWrap):
 
         repositories = dclient.repositories(namespace=self.ns)
         choices = [RepositoryMenu(repo) for repo in repositories.values()]
-        choices += [RepositoryMenu(repo) for repo in repositories.values()]
-        choices += [RepositoryMenu(repo) for repo in repositories.values()]
 
         actual_menu = make_menu(choices)
         self.menu = weakref.ref(actual_menu)
@@ -202,19 +206,6 @@ class ChangingText(Text):
 
     def change_heading(self, value: str):
         self.set_text(self.change_fmt.format(value))
-
-
-class HorizontalBoxes(urwid.Columns):
-    def __init__(self):
-        super().__init__([], dividechars=1)
-
-    def open_box(self, box):
-        if self.contents:
-            del self.contents[self.focus_position + 1 :]
-        self.contents.append(
-            (AttrMap(box, "options", focus_map), self.options("given", 24))
-        )
-        self.focus_position = len(self.contents) - 1
 
 
 class PileMenu(Pile):
@@ -285,15 +276,30 @@ tags_frame = Frame(
 menus_frame = PileMenu([namespaces_frame, images_frame, tags_frame])
 menus_container = Filler(menus_frame, valign=urwid.TOP)
 
+display_frame = Frame(
+    urwid.SolidFill(),
+    header=AttrMap(
+        pad_text(Text("", align=urwid.CENTER)),
+        "heading",
+    ),
+)
+
 try:
     container = Columns([], dividechars=1, focus_column=0)
     container.contents.append((
-        # AttrMap(menus_container, "options", focus_map),
         menus_container,
-        Columns.options("given", 40),
+        Columns.options(urwid.GIVEN, 40),
+    ))
+    container.contents.append((
+        Filler(
+            AttrMap(display_frame, "options", focus_map),
+            valign=urwid.TOP,
+            height=screen_rows,
+        ),
+        Columns.options(),
     ))
 
-    loop = urwid.MainLoop(container, palette=palette, screen=screen)
+    loop = urwid.MainLoop(container, palette=palette, screen=screen, handle_mouse=False)
     loop.run()
 except KeyboardInterrupt:
     pass

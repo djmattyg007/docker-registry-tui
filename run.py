@@ -14,6 +14,7 @@ dclient = DockerRegistryClient(
     host="https://" + os.getenv("REGISTRY_HOSTNAME"),
     username=os.getenv("REGISTRY_USERNAME"),
     password=os.getenv("REGISTRY_PASSWORD"),
+    api_version=2,
 )
 dclient.refresh()
 

@@ -1,3 +1,4 @@
+import itertools
 import os
 import weakref
 
@@ -6,13 +7,34 @@ from docker_registry_client.Repository import RepositoryV2
 from dotenv import load_dotenv
 
 import urwid
-from urwid import AttrMap, Filler, Frame, Pile
+from urwid import AttrMap, Columns, Filler, Frame, Pile, Text
 
 
 load_dotenv()
 
 line = urwid.Divider("\N{LOWER ONE QUARTER BLOCK}")
 divider = urwid.Divider()
+
+palette = [
+    (None, "light gray", "black"),
+    ("heading", "black", "light gray"),
+    ("footer", "black", "light gray"),
+    ("line", "black", "light gray"),
+    ("options", "dark gray", "black"),
+    ("focus heading", "white", "dark red"),
+    ("focus line", "black", "dark red"),
+    ("focus options", "black", "light gray"),
+    ("selected", "white", "dark blue"),
+]
+focus_map = {
+    "heading": "focus heading",
+    "footer": "footer",
+    "options": "focus options",
+    "line": "focus line",
+}
+
+screen = urwid.raw_display.Screen()
+screen_cols, screen_rows = screen.get_cols_rows()
 
 
 dclient = DockerRegistryClient(
@@ -45,7 +67,7 @@ def make_menu(choices: list[urwid.WidgetWrap]):
 
 
 def make_menubox(heading: str, choices: list[urwid.WidgetWrap]):
-    header = AttrMap(urwid.Text(["\n ", heading]), "heading")
+    header = AttrMap(Text(["\n ", heading]), "heading")
     menu = make_menu(choices)
     frame = Frame(menu, header)
     return frame
@@ -75,9 +97,9 @@ class TagChoice(urwid.WidgetWrap):
     def item_chosen(self):
         manifest, digest = self.repo.manifest(self.tag)
 
-        heading = AttrMap(urwid.Text(["\n ", self.tag]), "heading")
-        manifest_display = urwid.Text(str(manifest), wrap=urwid.ANY)
-        digest_display = urwid.Text(str(digest), wrap=urwid.ANY)
+        heading = AttrMap(Text(["\n ", self.tag]), "heading")
+        manifest_display = Text(str(manifest), wrap=urwid.ANY)
+        digest_display = Text(str(digest), wrap=urwid.ANY)
 
         response_box = Filler(Pile([
             heading,
@@ -173,26 +195,7 @@ class NamespaceMenu(urwid.WidgetWrap):
         self._open_menu(self.ns, actual_menu)
 
 
-palette = [
-    (None, "light gray", "black"),
-    ("heading", "black", "light gray"),
-    ("footer", "black", "light gray"),
-    ("line", "black", "light gray"),
-    ("options", "dark gray", "black"),
-    ("focus heading", "white", "dark red"),
-    ("focus line", "black", "dark red"),
-    ("focus options", "black", "light gray"),
-    ("selected", "white", "dark blue"),
-]
-focus_map = {
-    "heading": "focus heading",
-    "footer": "footer",
-    "options": "focus options",
-    "line": "focus line",
-}
-
-
-class ChangingText(urwid.Text):
+class ChangingText(Text):
     def __init__(self, markup, change_fmt, *args, **kwargs):
         super().__init__(markup, *args, **kwargs)
         self.change_fmt = change_fmt
@@ -214,90 +217,82 @@ class HorizontalBoxes(urwid.Columns):
         self.focus_position = len(self.contents) - 1
 
 
-namespaces = dclient.namespaces()
-# menu_top = make_menubox(
-#     "Namespaces",
-#     [NamespaceMenu(ns) for ns in namespaces],
-# )
+class PileMenu(Pile):
+    def __init__(self, widget_list):
+        super().__init__([])
 
-screen = urwid.raw_display.Screen()
-screen_cols, screen_rows = screen.get_cols_rows()
+        widget_count = len(widget_list)
+        menu_height = screen_rows // widget_count
+        reduce_height_pool = screen_rows - (widget_count * menu_height) - (widget_count - 1)
 
-menu_frame_height = screen_rows // 3
-namespaces_frame_height = images_frame_height = tags_frame_height = menu_frame_height
-if (menu_frame_height * 3) >= screen_rows - 1:
-    namespaces_frame_height -= 1
-if (menu_frame_height * 3) >= screen_rows:
-    images_frame_height -= 1
+        dividers = itertools.repeat(divider, widget_count - 1)
+        for i, (menu, _divider) in enumerate(itertools.zip_longest(widget_list, dividers)):
+            height = menu_height
+            if reduce_height_pool < 0:
+                height -= 1
+                reduce_height_pool += 1
+
+            self.contents.append((
+                AttrMap(menu, "options", focus_map),
+                (urwid.GIVEN, height),
+            ))
+
+            if _divider:
+                self.contents.append((_divider, (urwid.WEIGHT, 1)))
+
+        self.focus_position = 0
 
 
-def pad_text(widget: urwid.Text):
+def pad_text(widget: Text):
     return urwid.Padding(widget, left=1, right=1)
 
 
+namespaces = dclient.namespaces()
 namespaces_frame = Frame(
-    Filler(
-        make_menu([NamespaceMenu(ns) for ns in dclient.namespaces()]),
-        valign=urwid.TOP,
-        height=menu_frame_height,
-    ),
+    make_menu([NamespaceMenu(ns) for ns in namespaces]),
     header=AttrMap(
-        pad_text(urwid.Text("Namespaces")),
+        pad_text(Text("Namespaces")),
         "heading",
     ),
     footer=AttrMap(
-        pad_text(urwid.Text([str(len(namespaces)), " namespaces"])),
+        pad_text(Text([str(len(namespaces)), " namespaces"])),
         "footer",
     )
 )
 images_frame = Frame(
-    Filler(
-        make_menu([]),
-        valign=urwid.TOP,
-        height=menu_frame_height,
-    ),
+    make_menu([]),
     header=AttrMap(
         pad_text(ChangingText("Images", "Images: {}")),
         "heading",
     ),
     footer=AttrMap(
-        pad_text(urwid.Text("")),
+        pad_text(Text("")),
         "footer",
     ),
 )
 tags_frame = Frame(
-    Filler(
-        make_menu([]),
-        valign=urwid.TOP,
-        height=menu_frame_height,
-    ),
+    make_menu([]),
     header=AttrMap(
         pad_text(ChangingText("Tags", "Tags: {}")),
         "heading",
     ),
     footer=AttrMap(
-        pad_text(urwid.Text("")),
+        pad_text(Text("")),
         "footer",
     ),
 )
 
-menus_list = [
-    (namespaces_frame_height, namespaces_frame),
-    divider,
-    (images_frame_height, images_frame),
-    divider,
-    (tags_frame_height, tags_frame),
-]
-menus_frame = Pile(menus_list, focus_item=0)
+menus_frame = PileMenu([namespaces_frame, images_frame, tags_frame])
+menus_container = Filler(menus_frame, valign=urwid.TOP)
 
-#top = HorizontalBoxes()
-#top.open_box(menu_top)
 try:
-    container = urwid.Padding(
-        Filler(menus_frame, valign=urwid.TOP),
-        width=40,
-    )
-    # container = Filler(top, "middle", 10)
+    container = Columns([], dividechars=1, focus_column=0)
+    container.contents.append((
+        # AttrMap(menus_container, "options", focus_map),
+        menus_container,
+        Columns.options("given", 40),
+    ))
+
     loop = urwid.MainLoop(container, palette=palette, screen=screen)
     loop.run()
 except KeyboardInterrupt:

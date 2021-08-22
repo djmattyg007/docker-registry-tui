@@ -41,18 +41,6 @@ class MenuButton(urwid.Button):
         )
 
 
-class SubMenu(urwid.WidgetWrap):
-    def __init__(self, caption, choices):
-        super().__init__(
-            MenuButton([caption, "\N{HORIZONTAL ELLIPSIS}"], self.open_menu)
-        )
-
-        self.menu = make_menu(caption, choices)
-
-    def open_menu(self, button):
-        top.open_box(self.menu)
-
-
 class TagChoice(urwid.WidgetWrap):
     def __init__(self, repo: RepositoryV2, tag: str):
         super().__init__(
@@ -123,16 +111,13 @@ class NamespaceMenu(urwid.WidgetWrap):
 
         repositories = dclient.repositories(namespace=self.ns)
         choices = [RepositoryMenu(repo) for repo in repositories.values()]
+        choices += [RepositoryMenu(repo) for repo in repositories.values()]
+        choices += [RepositoryMenu(repo) for repo in repositories.values()]
 
         actual_menu = make_menu(self.ns, choices)
         self.menu = weakref.ref(actual_menu)
         top.open_box(actual_menu)
 
-
-menu_top = SubMenu(
-    "Namespaces",
-    [NamespaceMenu(ns) for ns in dclient.namespaces()],
-)
 
 palette = [
     (None, "light gray", "black"),
@@ -164,9 +149,16 @@ class HorizontalBoxes(urwid.Columns):
         self.focus_position = len(self.contents) - 1
 
 
+menu_top = make_menu(
+    "Namespaces",
+    [NamespaceMenu(ns) for ns in dclient.namespaces()],
+)
+
 top = HorizontalBoxes()
-top.open_box(menu_top.menu)
+top.open_box(menu_top)
 try:
-    urwid.MainLoop(urwid.Filler(top, "middle", 10), palette).run()
+    container = urwid.Filler(top, "middle", 10)
+    loop = urwid.MainLoop(container, palette)
+    loop.run()
 except KeyboardInterrupt:
     pass

@@ -18,6 +18,12 @@ dclient = DockerRegistryClient(
 dclient.refresh()
 
 
+def cb(func):
+    def wrap(*args, **kwargs):
+        func()
+    return wrap
+
+
 def make_menu(heading: str, choices: list[urwid.WidgetWrap]):
     header = urwid.AttrMap(urwid.Text(["\n ", heading]), "heading")
 
@@ -44,13 +50,13 @@ class MenuButton(urwid.Button):
 class TagChoice(urwid.WidgetWrap):
     def __init__(self, repo: RepositoryV2, tag: str):
         super().__init__(
-            MenuButton(tag, self.item_chosen)
+            MenuButton(tag, cb(self.item_chosen))
         )
         self.repo = repo
         self.tag = tag
         self.menu = None
 
-    def item_chosen(self, button):
+    def item_chosen(self):
         manifest, digest = self.repo.manifest(self.tag)
 
         heading = urwid.AttrMap(urwid.Text(["\n ", self.tag]), "heading")
@@ -72,12 +78,12 @@ class TagChoice(urwid.WidgetWrap):
 class RepositoryMenu(urwid.WidgetWrap):
     def __init__(self, repo: RepositoryV2):
         super().__init__(
-            MenuButton(repo.repository, self.open_menu)
+            MenuButton(repo.repository, cb(self.open_menu))
         )
         self.repo = repo
         self.menu = None
 
-    def open_menu(self, button):
+    def open_menu(self):
         menu = self.menu
         if menu:
             actual_menu = menu()
@@ -96,12 +102,12 @@ class RepositoryMenu(urwid.WidgetWrap):
 class NamespaceMenu(urwid.WidgetWrap):
     def __init__(self, ns: str):
         super().__init__(
-            MenuButton(ns, self.open_menu)
+            MenuButton(ns, cb(self.open_menu))
         )
         self.ns = ns
         self.menu = None
 
-    def open_menu(self, button):
+    def open_menu(self):
         menu = self.menu
         if menu:
             actual_menu = menu()

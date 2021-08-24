@@ -104,16 +104,24 @@ class TagChoice(urwid.WidgetWrap):
         self.menu = None
 
     def item_chosen(self):
-        manifest, digest = self.repo.manifest(self.tag)
-
-        manifest_pp = ppjson(manifest)
-
         header: Text = unwrap(display_frame.header)
         header.set_text(f"{self.repo.name}: {self.tag}")
 
-        digest_display = Text(digest, wrap=urwid.ANY)
-        manifest_display = Text(manifest_pp, wrap=urwid.ANY)
-        display = Pile([digest_display, divider, manifest_display])
+        try:
+            manifest, digest = self.repo.manifest(self.tag)
+
+            manifest_pp = ppjson(manifest)
+            digest_display = Text(digest, wrap=urwid.ANY)
+            manifest_display = Text(manifest_pp, wrap=urwid.ANY)
+            display_items = [digest_display, divider, manifest_display]
+        except Exception as e:
+            display_items = [
+                Text("An error occurred."),
+                divider,
+                Text("{0}: {1}".format(e.__class__.__name__, str(e))),
+            ]
+
+        display = Pile(display_items)
         display_frame.body = Scrollable(display)
 
         container.focus_position = 1

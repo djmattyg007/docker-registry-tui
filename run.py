@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import itertools
 import os
@@ -6,7 +8,7 @@ from typing import Iterable
 
 from dotenv import load_dotenv
 from dreg_client import PlatformImage, Registry, Repository
-from humanfriendly import format_size
+from humanfriendly import format_size as base_format_size
 import simplejson as json
 
 import urwid
@@ -15,6 +17,9 @@ from additional_urwid_widgets import IndicativeListBox
 
 from dreg.scrollable import Scrollable
 from dreg.selectable_row import BetterSelectableRow
+
+
+LAYER_HISTORY_INSTR_PREFIX = "/bin/sh -c #(nop)"
 
 
 load_dotenv()
@@ -56,6 +61,12 @@ def asdicts(data_objs: Iterable) -> Iterable[dict]:
         yield dataclasses.asdict(data_obj)
 
 
+def format_size(num_bytes: int) -> str:
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    return base_format_size(num_bytes, binary=True)
+
+
 def sum_layer_sizes(pimage: PlatformImage) -> int:
     return sum(map(lambda layer: layer.size, pimage.layers))
 
@@ -89,9 +100,10 @@ def ppjson(input_json) -> str:
     return json.dumps(input_json, cls=JSONEncoder, indent=2, allow_nan=False, iterable_as_array=True)
 
 
-def make_menu(choices: list[urwid.WidgetWrap]):
+def make_menu(choices: list[urwid.WidgetWrap], **kwargs):
     listbox = IndicativeListBox(
-        urwid.SimpleFocusListWalker(choices)
+        urwid.SimpleFocusListWalker(choices),
+        **kwargs,
     )
     menu = AttrMap(listbox, "options")
     return menu
@@ -109,6 +121,54 @@ class MenuButton(urwid.Button):
         )
 
 
+class LayerChoice(BetterSelectableRow):
+    def __init__(self, pimage: PlatformImage, history_idx: int):
+        def columns_factory(*args, **kwargs):
+            columns = Columns(*args, **kwargs)
+            return AttrMap(columns, None, "selected")
+
+        def column_factory(*args, **kwargs):
+            return pad_text(urwid.Text(*args, **kwargs))
+
+        history_item = pimage.config.history[history_idx]
+        if history_item.empty_layer:
+            size_str = format_size(0)
+        else:
+            layer_idx = None
+            non_empty_history = filter(lambda item: not item.empty_layer, pimage.config.history)
+            for non_empty_layer_idx, non_empty_history_item in enumerate(non_empty_history):
+                if non_empty_history_item is history_item:
+                    layer_idx = non_empty_layer_idx
+                    break
+
+            if layer_idx is None:
+                raise Exception("Logic failure.")
+
+            relevant_layer = pimage.layers[layer_idx]
+            size_str = format_size(relevant_layer.size)
+
+        history_label = history_item.created_by
+        if history_label.startswith(LAYER_HISTORY_INSTR_PREFIX):
+            history_label = history_label[len(LAYER_HISTORY_INSTR_PREFIX):]
+        history_label = history_label.strip()
+
+        if len(history_label) > 25:
+            history_label = history_label[:22] + "..."
+
+        super().__init__(
+            [
+                history_label,
+                (size_str, urwid.RIGHT),
+            ],
+            space_between=1,
+            columns_factory=columns_factory,
+            column_factory=column_factory,
+        )
+
+        self.pimage = pimage
+        self.history_idx = history_idx
+
+
 class PlatformChoice(BetterSelectableRow):
     def __init__(self, pimage: PlatformImage):
         def columns_factory(*args, **kwargs):
@@ -120,17 +180,44 @@ class PlatformChoice(BetterSelectableRow):
 
         image_size = sum_layer_sizes(pimage)
         super().__init__(
-            [pimage.platform_name, trim_digest(pimage.digest), format_size(image_size, binary=True)],
+            [
+                pimage.platform_name,
+                trim_digest(pimage.digest),
+                (format_size(image_size), urwid.RIGHT),
+            ],
             on_select=cb(self.item_chosen),
             space_between=1,
             columns_factory=columns_factory,
             column_factory=column_factory,
         )
+
         self.pimage = pimage
         self.menu = None
 
     def item_chosen(self):
-        raise urwid.ExitMainLoop()
+        menu = self.menu
+        if menu:
+            actual_menu = menu()
+            if actual_menu:
+                layers_frame.body = actual_menu
+                display_pile.focus_position = 2
+                return
+
+        choices = [LayerChoice(self.pimage, idx) for idx, _ in enumerate(self.pimage.config.history)]
+        actual_menu = make_menu(
+            choices,
+            on_selection_change=self.layer_selection_change,
+            initialization_is_selection_change=True,
+        )
+
+        self.menu = weakref.ref(actual_menu)
+        layers_frame.body = actual_menu
+        display_pile.focus_position = 2
+
+        # TODO: We actually need to set up columns inside of layers_frame
+
+    def layer_selection_change(self, _prev_idx, new_idx):
+        pass
 
 
 class TagChoice(urwid.WidgetWrap):

@@ -1,3 +1,4 @@
-docker-registry-client==0.5.2
+dreg-client==1.0.2
 python-dotenv==0.19.0
+simplejson==3.17.5
 urwid==2.1.2

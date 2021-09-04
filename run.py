@@ -1,14 +1,16 @@
+import dataclasses
 import itertools
-import json
 import os
 import weakref
+from typing import Iterable
 
-from docker_registry_client import DockerRegistryClient
-from docker_registry_client.Repository import RepositoryV2
 from dotenv import load_dotenv
+from dreg_client import Registry, Repository
+import simplejson as json
 
 import urwid
 from urwid import AttrMap, Columns, Filler, Frame, Pile, Text
+from additional_urwid_widgets import IndicativeListBox
 
 from dreg.scrollable import Scrollable
 
@@ -40,13 +42,23 @@ screen = urwid.raw_display.Screen()
 screen_cols, screen_rows = screen.get_cols_rows()
 
 
-dclient = DockerRegistryClient(
-    host="https://" + os.getenv("REGISTRY_HOSTNAME"),
-    username=os.getenv("REGISTRY_USERNAME"),
-    password=os.getenv("REGISTRY_PASSWORD"),
-    api_version=2,
+dclient = Registry.build_with_manual_client(
+    os.getenv("REGISTRY_URL"),
+    auth=(os.getenv("REGISTRY_USERNAME"), os.getenv("REGISTRY_PASSWORD")),
 )
 dclient.refresh()
+
+
+def asdicts(data_objs: Iterable) -> Iterable[dict]:
+    for data_obj in data_objs:
+        yield dataclasses.asdict(data_obj)
+
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        return super().default(o)
 
 
 def cb(func):
@@ -64,11 +76,11 @@ def unwrap(widget: urwid.Widget) -> urwid.Widget:
 def ppjson(input_json) -> str:
     if isinstance(input_json, str):
         input_json = json.loads(input_json)
-    return json.dumps(input_json, indent=2)
+    return json.dumps(input_json, cls=JSONEncoder, indent=2, allow_nan=False, iterable_as_array=True)
 
 
 def make_menu(choices: list[urwid.WidgetWrap]):
-    listbox = urwid.ListBox(
+    listbox = IndicativeListBox(
         urwid.SimpleFocusListWalker(choices)
     )
     menu = AttrMap(listbox, "options")
@@ -95,7 +107,7 @@ class MenuButton(urwid.Button):
 
 
 class TagChoice(urwid.WidgetWrap):
-    def __init__(self, repo: RepositoryV2, tag: str):
+    def __init__(self, repo: Repository, tag: str):
         super().__init__(
             MenuButton(tag, cb(self.item_chosen))
         )
@@ -108,11 +120,11 @@ class TagChoice(urwid.WidgetWrap):
         header.set_text(f"{self.repo.name}: {self.tag}")
 
         try:
-            manifest, digest = self.repo.manifest(self.tag)
+            image = self.repo.get_image(self.tag)
 
-            manifest_pp = ppjson(manifest)
-            digest_display = Text(digest, wrap=urwid.ANY)
-            manifest_display = Text(manifest_pp, wrap=urwid.ANY)
+            image_pp = ppjson(image.manifest_list)
+            digest_display = Text(image.manifest_list.digest, wrap=urwid.ANY)
+            manifest_display = Text(image_pp, wrap=urwid.ANY)
             display_items = [digest_display, divider, manifest_display]
         except Exception as e:
             display_items = [
@@ -128,7 +140,7 @@ class TagChoice(urwid.WidgetWrap):
 
 
 class RepositoryMenu(urwid.WidgetWrap):
-    def __init__(self, repo: RepositoryV2):
+    def __init__(self, repo: Repository):
         super().__init__(
             MenuButton(repo.repository, cb(self.open_menu))
         )
@@ -142,8 +154,8 @@ class RepositoryMenu(urwid.WidgetWrap):
         header.change_heading(heading)
 
         footer = unwrap(tags_frame.footer)
-        listbox: urwid.ListBox = unwrap(menu)
-        item_count = len(listbox.body)
+        listbox: IndicativeListBox = unwrap(menu)
+        item_count = listbox.body_len()
         if item_count == 1:
             footer.set_text("1 tag")
         else:
@@ -176,14 +188,15 @@ class NamespaceMenu(urwid.WidgetWrap):
         self.menu = None
 
     def _open_menu(self, heading: str, menu):
+        tags_frame.body = make_menu([])
         images_frame.body = menu
 
         header = unwrap(images_frame.header)
         header.change_heading(heading)
 
         footer = unwrap(images_frame.footer)
-        listbox: urwid.ListBox = unwrap(menu)
-        item_count = len(listbox.body)
+        listbox: IndicativeListBox = unwrap(menu)
+        item_count = listbox.body_len()
         if item_count == 1:
             footer.set_text("1 image")
         else:
@@ -296,7 +309,7 @@ try:
     container = Columns([], dividechars=1, focus_column=0)
     container.contents.append((
         menus_container,
-        Columns.options(urwid.GIVEN, 40),
+        Columns.options(urwid.GIVEN, 36),
     ))
     container.contents.append((
         Filler(

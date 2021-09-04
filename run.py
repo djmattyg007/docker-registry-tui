@@ -5,14 +5,16 @@ import weakref
 from typing import Iterable
 
 from dotenv import load_dotenv
-from dreg_client import Registry, Repository
+from dreg_client import PlatformImage, Registry, Repository
+from humanfriendly import format_size
 import simplejson as json
 
 import urwid
-from urwid import AttrMap, Columns, Filler, Frame, Pile, Text
+from urwid import AttrMap, Columns, Filler, Frame, Pile, SolidFill, Text
 from additional_urwid_widgets import IndicativeListBox
 
 from dreg.scrollable import Scrollable
+from dreg.selectable_row import BetterSelectableRow
 
 
 load_dotenv()
@@ -54,6 +56,14 @@ def asdicts(data_objs: Iterable) -> Iterable[dict]:
         yield dataclasses.asdict(data_obj)
 
 
+def sum_layer_sizes(pimage: PlatformImage) -> int:
+    return sum(map(lambda layer: layer.size, pimage.layers))
+
+
+def trim_digest(digest: str) -> str:
+    return digest[7:19]
+
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if dataclasses.is_dataclass(o):
@@ -87,13 +97,6 @@ def make_menu(choices: list[urwid.WidgetWrap]):
     return menu
 
 
-def make_menubox(heading: str, choices: list[urwid.WidgetWrap]):
-    header = AttrMap(Text(["\n ", heading]), "heading")
-    menu = make_menu(choices)
-    frame = Frame(menu, header)
-    return frame
-
-
 class MenuButton(urwid.Button):
     def __init__(self, caption, callback):
         super().__init__("")
@@ -106,37 +109,88 @@ class MenuButton(urwid.Button):
         )
 
 
+class PlatformChoice(BetterSelectableRow):
+    def __init__(self, pimage: PlatformImage):
+        def columns_factory(*args, **kwargs):
+            columns = Columns(*args, **kwargs)
+            return AttrMap(columns, None, "selected")
+
+        def column_factory(*args, **kwargs):
+            return pad_text(urwid.Text(*args, **kwargs))
+
+        image_size = sum_layer_sizes(pimage)
+        super().__init__(
+            [pimage.platform_name, trim_digest(pimage.digest), format_size(image_size, binary=True)],
+            on_select=cb(self.item_chosen),
+            space_between=1,
+            columns_factory=columns_factory,
+            column_factory=column_factory,
+        )
+        self.pimage = pimage
+        self.menu = None
+
+    def item_chosen(self):
+        raise urwid.ExitMainLoop()
+
+
 class TagChoice(urwid.WidgetWrap):
     def __init__(self, repo: Repository, tag: str):
         super().__init__(
-            MenuButton(tag, cb(self.item_chosen))
+            MenuButton(tag, cb(self.open_menu))
         )
         self.repo = repo
         self.tag = tag
         self.menu = None
 
-    def item_chosen(self):
+    def _open_menu(self, menu):
+        reset_display()
+
         header: Text = unwrap(display_frame.header)
-        header.set_text(f"{self.repo.name}: {self.tag}")
+        header.set_text(f"{self.repo.name} - {self.tag}")
 
-        try:
-            image = self.repo.get_image(self.tag)
-
-            image_pp = ppjson(image.manifest_list)
-            digest_display = Text(image.manifest_list.digest, wrap=urwid.ANY)
-            manifest_display = Text(image_pp, wrap=urwid.ANY)
-            display_items = [digest_display, divider, manifest_display]
-        except Exception as e:
-            display_items = [
-                Text("An error occurred."),
-                divider,
-                Text("{0}: {1}".format(e.__class__.__name__, str(e))),
-            ]
-
-        display = Pile(display_items)
-        display_frame.body = Scrollable(display)
+        platforms_frame.body = menu
 
         container.focus_position = 1
+
+    def open_menu(self):
+        menu = self.menu
+        if menu:
+            actual_menu = menu()
+            if actual_menu:
+                self._open_menu(actual_menu)
+                return
+
+        image = self.repo.get_image(self.tag)
+        pimages = image.get_platform_images()
+        choices = [PlatformChoice(pimage) for pimage in pimages]
+
+        actual_menu = make_menu(choices)
+        self.menu = weakref.ref(actual_menu)
+        self._open_menu(actual_menu)
+
+    # def item_chosen(self):
+    #     header: Text = unwrap(display_frame.header)
+    #     header.set_text(f"{self.repo.name}: {self.tag}")
+    #
+    #     try:
+    #         image = self.repo.get_image(self.tag)
+    #
+    #         image_pp = ppjson(image.manifest_list)
+    #         digest_display = Text(image.manifest_list.digest, wrap=urwid.ANY)
+    #         manifest_display = Text(image_pp * 2, wrap=urwid.ANY)
+    #         display_items = [digest_display, divider, manifest_display]
+    #     except Exception as e:
+    #         display_items = [
+    #             Text("An error occurred."),
+    #             divider,
+    #             Text("{0}: {1}".format(e.__class__.__name__, str(e))),
+    #         ]
+    #
+    #     display = Pile(display_items)
+    #     platforms_frame.body = Filler(display)
+    #     layers_frame.body = Scrollable(display)
+    #
+    #     container.focus_position = 1
 
 
 class RepositoryMenu(urwid.WidgetWrap):
@@ -147,12 +201,12 @@ class RepositoryMenu(urwid.WidgetWrap):
         self.repo = repo
         self.menu = None
 
-    def _open_menu(self, heading: str, menu: Frame):
-        display_frame.reset()
+    def _open_menu(self, menu):
+        reset_display()
         tags_frame.body = menu
 
         header: ChangingText = unwrap(tags_frame.header)
-        header.change_heading(heading)
+        header.change_heading(self.repo.name)
 
         footer: Text = unwrap(tags_frame.footer)
         listbox: IndicativeListBox = unwrap(menu)
@@ -169,7 +223,7 @@ class RepositoryMenu(urwid.WidgetWrap):
         if menu:
             actual_menu = menu()
             if actual_menu:
-                self._open_menu(self.repo.name, actual_menu)
+                self._open_menu(actual_menu)
                 return
 
         tags = self.repo.tags()
@@ -177,7 +231,7 @@ class RepositoryMenu(urwid.WidgetWrap):
 
         actual_menu = make_menu(choices)
         self.menu = weakref.ref(actual_menu)
-        self._open_menu(self.repo.name, actual_menu)
+        self._open_menu(actual_menu)
 
 
 class NamespaceMenu(urwid.WidgetWrap):
@@ -188,13 +242,13 @@ class NamespaceMenu(urwid.WidgetWrap):
         self.ns = ns
         self.menu = None
 
-    def _open_menu(self, heading: str, menu):
-        display_frame.reset()
+    def _open_menu(self, menu):
+        reset_display()
         tags_frame.body = make_menu([])
         images_frame.body = menu
 
         header: ChangingText = unwrap(images_frame.header)
-        header.change_heading(heading)
+        header.change_heading(self.ns)
 
         footer: Text = unwrap(images_frame.footer)
         listbox: IndicativeListBox = unwrap(menu)
@@ -211,7 +265,7 @@ class NamespaceMenu(urwid.WidgetWrap):
         if menu:
             actual_menu = menu()
             if actual_menu:
-                self._open_menu(self.ns, actual_menu)
+                self._open_menu(actual_menu)
                 return
 
         repositories = dclient.repositories(namespace=self.ns)
@@ -219,7 +273,7 @@ class NamespaceMenu(urwid.WidgetWrap):
 
         actual_menu = make_menu(choices)
         self.menu = weakref.ref(actual_menu)
-        self._open_menu(self.ns, actual_menu)
+        self._open_menu(actual_menu)
 
 
 class ChangingText(Text):
@@ -327,13 +381,37 @@ tags_frame = Frame(
 menus_frame = PileMenu([namespaces_frame, images_frame, tags_frame])
 menus_container = Filler(menus_frame, valign=urwid.TOP)
 
+platforms_frame = ResettableFrame(
+    SolidFill(),
+)
+layers_frame = ResettableFrame(
+    SolidFill(),
+)
+
+display_pile = Pile([])
+display_pile.contents.append((
+    platforms_frame, Pile.options(urwid.GIVEN, 7)
+))
+display_pile.contents.append((
+    Filler(divider), Pile.options(urwid.GIVEN, 1)
+))
+display_pile.contents.append((
+    layers_frame, Pile.options(urwid.WEIGHT, 1)
+))
 display_frame = ResettableFrame(
-    urwid.SolidFill(),
+    Filler(display_pile, height=screen_rows - 1),
     header=AttrMap(
         pad_text(Text("", align=urwid.CENTER)),
         "heading",
     ),
 )
+
+
+def reset_display():
+    layers_frame.reset()
+    platforms_frame.reset()
+    display_frame.reset()
+
 
 try:
     container = Columns([], dividechars=1, focus_column=0)

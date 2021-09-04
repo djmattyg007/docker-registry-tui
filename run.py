@@ -148,12 +148,13 @@ class RepositoryMenu(urwid.WidgetWrap):
         self.menu = None
 
     def _open_menu(self, heading: str, menu: Frame):
+        display_frame.reset()
         tags_frame.body = menu
 
         header: ChangingText = unwrap(tags_frame.header)
         header.change_heading(heading)
 
-        footer = unwrap(tags_frame.footer)
+        footer: Text = unwrap(tags_frame.footer)
         listbox: IndicativeListBox = unwrap(menu)
         item_count = listbox.body_len()
         if item_count == 1:
@@ -188,13 +189,14 @@ class NamespaceMenu(urwid.WidgetWrap):
         self.menu = None
 
     def _open_menu(self, heading: str, menu):
+        display_frame.reset()
         tags_frame.body = make_menu([])
         images_frame.body = menu
 
-        header = unwrap(images_frame.header)
+        header: ChangingText = unwrap(images_frame.header)
         header.change_heading(heading)
 
-        footer = unwrap(images_frame.footer)
+        footer: Text = unwrap(images_frame.footer)
         listbox: IndicativeListBox = unwrap(menu)
         item_count = listbox.body_len()
         if item_count == 1:
@@ -227,6 +229,34 @@ class ChangingText(Text):
 
     def change_heading(self, value: str):
         self.set_text(self.change_fmt.format(value))
+
+
+class ResettableFrame(Frame):
+    def __init__(self, body, header=None, footer=None, focus_part="body"):
+        super().__init__(body, header=header, footer=footer, focus_part=focus_part)
+
+        self.orig_body = body
+        self.orig_header_text = None
+        self.orig_footer_text = None
+
+        if header:
+            header_widget: Text = unwrap(header)
+            self.orig_header_text = header_widget.text
+
+        if footer:
+            footer_widget: Text = unwrap(footer)
+            self.orig_footer_text = footer_widget.text
+
+    def reset(self):
+        self.body = self.orig_body
+
+        if self.orig_header_text is not None:
+            header_widget: Text = unwrap(self.header)
+            header_widget.set_text(self.orig_header_text)
+
+        if self.orig_footer_text is not None:
+            footer_widget: Text = unwrap(self.footer)
+            footer_widget.set_text(self.orig_footer_text)
 
 
 class PileMenu(Pile):
@@ -297,7 +327,7 @@ tags_frame = Frame(
 menus_frame = PileMenu([namespaces_frame, images_frame, tags_frame])
 menus_container = Filler(menus_frame, valign=urwid.TOP)
 
-display_frame = Frame(
+display_frame = ResettableFrame(
     urwid.SolidFill(),
     header=AttrMap(
         pad_text(Text("", align=urwid.CENTER)),

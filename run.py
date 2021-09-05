@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import os
+import re
 import weakref
-from typing import Iterable, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 from dreg_client import Platform, PlatformImage, Registry, Repository
 from humanfriendly import format_size as base_format_size
-import simplejson as json
 
 import urwid
 from urwid import AttrMap, Columns, Filler, Frame, Pile, SolidFill, Text
@@ -17,11 +16,6 @@ from additional_urwid_widgets import IndicativeListBox
 
 from dreg.scrollable import Scrollable
 from dreg.selectable_row import BetterSelectableRow
-
-
-LAYER_HISTORY_INSTR_PREFIX = "/bin/sh -c #(nop)"
-LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT = "# buildkit"
-LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX = "RUN /bin/sh -c"
 
 
 load_dotenv()
@@ -65,44 +59,25 @@ dclient = Registry.build_with_manual_client(
 dclient.refresh()
 
 
-def asdicts(data_objs: Iterable) -> Iterable[dict]:
-    for data_obj in data_objs:
-        yield dataclasses.asdict(data_obj)
-
-
 def format_size(num_bytes: int) -> str:
     if num_bytes < 1024:
         return f"{num_bytes} B"
     return base_format_size(num_bytes, binary=True)
 
 
-def sum_layer_sizes(pimage: PlatformImage) -> int:
-    return sum(map(lambda layer: layer.size, pimage.layers))
-
-
 def trim_digest(digest: str) -> str:
     return digest[7:19]
 
 
-def clean_created_by(created_by: str) -> str:
-    created_by = created_by.strip()
+def format_created_by(created_by: str) -> str:
+    if not created_by.startswith("RUN "):
+        return created_by
 
-    if created_by.startswith(LAYER_HISTORY_INSTR_PREFIX):
-        created_by = created_by[len(LAYER_HISTORY_INSTR_PREFIX):].strip()
-    if created_by.endswith(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT):
-        created_by = created_by[:-len(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT)].strip()
-
-    if created_by.startswith(LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX):
-        created_by = "RUN " + created_by[len(LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX):].strip()
-
+    created_by = re.sub(r"([^ ]) &&  ", r"\1 &&\n  ", created_by)
+    created_by = re.sub(r"([^ ])([ ]+)&& ", r"\1\n\2&& ", created_by)
+    created_by = re.sub(r"([^& ])( {6,})([^& ])", r"\1\n\2\3", created_by)
+    created_by = re.sub(r"&&( {3,})([^& ])", r"&&\n\1\2", created_by)
     return created_by
-
-
-class JSONEncoder(json.JSONEncoder):
-    def default(self, o):
-        if dataclasses.is_dataclass(o):
-            return dataclasses.asdict(o)
-        return super().default(o)
 
 
 def cb(func):
@@ -115,12 +90,6 @@ def unwrap(widget: urwid.Widget) -> urwid.Widget:
     while isinstance(widget, urwid.WidgetDecoration):
         widget = widget.original_widget
     return widget
-
-
-def ppjson(input_json) -> str:
-    if isinstance(input_json, str):
-        input_json = json.loads(input_json)
-    return json.dumps(input_json, cls=JSONEncoder, indent=2, allow_nan=False, iterable_as_array=True)
 
 
 def make_menu(choices: list[urwid.WidgetWrap], **kwargs):
@@ -170,11 +139,9 @@ class LayerChoice(BetterSelectableRow):
             relevant_layer = pimage.layers[layer_idx]
             size_str = format_size(relevant_layer.size)
 
-        history_label = clean_created_by(history_item.created_by)
-
         super().__init__(
             (
-                (history_label, {"width": 27, "wrap": "ellipsis"}),
+                (history_item.clean_created_by, {"width": 27, "wrap": "ellipsis"}),
                 (size_str, {"align": urwid.RIGHT}),
             ),
             space_between=1,
@@ -195,12 +162,11 @@ class PlatformChoice(BetterSelectableRow):
         def column_factory(*args, **kwargs):
             return pad_text(Text(*args, **kwargs))
 
-        image_size = sum_layer_sizes(pimage)
         super().__init__(
             (
                 pimage.platform_name,
                 trim_digest(pimage.digest),
-                (format_size(image_size), {"align": urwid.RIGHT}),
+                (format_size(pimage.image_size), {"align": urwid.RIGHT}),
             ),
             on_select=cb(self.open_menu),
             space_between=1,
@@ -226,7 +192,7 @@ class PlatformChoice(BetterSelectableRow):
 
     def _make_view_text(self, idx: int) -> Text:
         history_item = self.pimage.config.history[idx]
-        text = clean_created_by(history_item.created_by)
+        text = format_created_by(history_item.clean_created_by)
         return Text(text, wrap=urwid.ANY)
 
     def open_menu(self):

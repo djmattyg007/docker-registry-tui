@@ -21,6 +21,7 @@ from dreg.selectable_row import BetterSelectableRow
 
 LAYER_HISTORY_INSTR_PREFIX = "/bin/sh -c #(nop)"
 LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT = "# buildkit"
+LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX = "RUN /bin/sh -c"
 
 
 load_dotenv()
@@ -90,6 +91,9 @@ def clean_created_by(created_by: str) -> str:
         created_by = created_by[len(LAYER_HISTORY_INSTR_PREFIX):].strip()
     if created_by.endswith(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT):
         created_by = created_by[:-len(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT)].strip()
+
+    if created_by.startswith(LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX):
+        created_by = "RUN " + created_by[len(LAYER_HISTORY_INSTR_RUN_WRAP_PREFIX):].strip()
 
     return created_by
 
@@ -167,14 +171,12 @@ class LayerChoice(BetterSelectableRow):
             size_str = format_size(relevant_layer.size)
 
         history_label = clean_created_by(history_item.created_by)
-        if len(history_label) > 25:
-            history_label = history_label[:22] + "..."
 
         super().__init__(
-            [
-                history_label,
-                (size_str, urwid.RIGHT),
-            ],
+            (
+                (history_label, {"width": 27, "wrap": "ellipsis"}),
+                (size_str, {"align": urwid.RIGHT}),
+            ),
             space_between=1,
             columns_factory=columns_factory,
             column_factory=column_factory,
@@ -195,11 +197,11 @@ class PlatformChoice(BetterSelectableRow):
 
         image_size = sum_layer_sizes(pimage)
         super().__init__(
-            [
+            (
                 pimage.platform_name,
                 trim_digest(pimage.digest),
-                (format_size(image_size), urwid.RIGHT),
-            ],
+                (format_size(image_size), {"align": urwid.RIGHT}),
+            ),
             on_select=cb(self.open_menu),
             space_between=1,
             columns_factory=columns_factory,
@@ -213,7 +215,7 @@ class PlatformChoice(BetterSelectableRow):
     def _open_menu(self, menu, viewer):
         layer_view_container = Columns([], dividechars=1, focus_column=0)
         layer_view_container.contents.append((
-            menu, Columns.options(urwid.GIVEN, 54)
+            menu, Columns.options(urwid.GIVEN, 45)
         ))
         layer_view_container.contents.append((
             viewer, Columns.options()

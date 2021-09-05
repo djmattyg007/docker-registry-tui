@@ -20,8 +20,11 @@ class BetterSelectableRow(_SelectableRow):
         column_widgets = []
         for c in contents:
             if isinstance(c, tuple):
-                c_text, c_align = c
-                column = column_factory(c_text, align=c_align)
+                c_text, c_settings = c
+                width = c_settings.pop("width", None)
+                column = column_factory(c_text, **c_settings)
+                if isinstance(width, int):
+                    column = (width, column)
             else:
                 column = column_factory(c, align=align)
             column_widgets.append(column)

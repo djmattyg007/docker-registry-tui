@@ -20,6 +20,7 @@ from dreg.selectable_row import BetterSelectableRow
 
 
 LAYER_HISTORY_INSTR_PREFIX = "/bin/sh -c #(nop)"
+LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT = "# buildkit"
 
 
 load_dotenv()
@@ -82,6 +83,17 @@ def trim_digest(digest: str) -> str:
     return digest[7:19]
 
 
+def clean_created_by(created_by: str) -> str:
+    created_by = created_by.strip()
+
+    if created_by.startswith(LAYER_HISTORY_INSTR_PREFIX):
+        created_by = created_by[len(LAYER_HISTORY_INSTR_PREFIX):].strip()
+    if created_by.endswith(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT):
+        created_by = created_by[:-len(LAYER_HISTORY_INSTR_SUFFIX_BUILDKIT)].strip()
+
+    return created_by
+
+
 class JSONEncoder(json.JSONEncoder):
     def default(self, o):
         if dataclasses.is_dataclass(o):
@@ -135,7 +147,7 @@ class LayerChoice(BetterSelectableRow):
             return AttrMap(columns, None, "selected")
 
         def column_factory(*args, **kwargs):
-            return pad_text(urwid.Text(*args, **kwargs))
+            return pad_text(Text(*args, **kwargs))
 
         history_item = pimage.config.history[history_idx]
         if history_item.empty_layer:
@@ -154,11 +166,7 @@ class LayerChoice(BetterSelectableRow):
             relevant_layer = pimage.layers[layer_idx]
             size_str = format_size(relevant_layer.size)
 
-        history_label = history_item.created_by
-        if history_label.startswith(LAYER_HISTORY_INSTR_PREFIX):
-            history_label = history_label[len(LAYER_HISTORY_INSTR_PREFIX):]
-        history_label = history_label.strip()
-
+        history_label = clean_created_by(history_item.created_by)
         if len(history_label) > 25:
             history_label = history_label[:22] + "..."
 
@@ -183,7 +191,7 @@ class PlatformChoice(BetterSelectableRow):
             return AttrMap(columns, None, "selected")
 
         def column_factory(*args, **kwargs):
-            return pad_text(urwid.Text(*args, **kwargs))
+            return pad_text(Text(*args, **kwargs))
 
         image_size = sum_layer_sizes(pimage)
         super().__init__(
@@ -200,19 +208,33 @@ class PlatformChoice(BetterSelectableRow):
 
         self.pimage = pimage
         self.menu = None
+        self.viewer = None
 
-    def _open_menu(self, menu):
-        layers_frame.body = menu
+    def _open_menu(self, menu, viewer):
+        layer_view_container = Columns([], dividechars=1, focus_column=0)
+        layer_view_container.contents.append((
+            menu, Columns.options(urwid.GIVEN, 54)
+        ))
+        layer_view_container.contents.append((
+            viewer, Columns.options()
+        ))
+
+        layers_frame.body = layer_view_container
         display_pile.focus_position = 2
 
-        # TODO: We actually need to set up columns inside of layers_frame
+    def _make_view_text(self, idx: int) -> Text:
+        history_item = self.pimage.config.history[idx]
+        text = clean_created_by(history_item.created_by)
+        return Text(text, wrap=urwid.ANY)
 
     def open_menu(self):
         menu = self.menu
-        if menu:
+        viewer = self.viewer
+        if menu and viewer:
             actual_menu = menu()
-            if actual_menu:
-                self._open_menu(actual_menu)
+            actual_viewer = viewer()
+            if actual_menu and actual_viewer:
+                self._open_menu(actual_menu, actual_viewer)
                 return
 
         choices = [LayerChoice(self.pimage, idx) for idx, _ in enumerate(self.pimage.config.history)]
@@ -222,11 +244,24 @@ class PlatformChoice(BetterSelectableRow):
             initialization_is_selection_change=True,
         )
 
+        initial_view = self._make_view_text(0)
+        actual_viewer = Scrollable(initial_view)
+
         self.menu = weakref.ref(actual_menu)
-        self._open_menu(actual_menu)
+        self.viewer = weakref.ref(actual_viewer)
+
+        self._open_menu(actual_menu, actual_viewer)
 
     def layer_selection_change(self, _prev_idx, new_idx):
-        pass
+        viewer = self.viewer
+        if not viewer:
+            return
+        actual_viewer: Optional[Scrollable] = viewer()
+        if not actual_viewer:
+            return
+
+        new_view = self._make_view_text(new_idx)
+        actual_viewer.original_widget = new_view
 
 
 class TagChoice(urwid.WidgetWrap):
@@ -247,6 +282,7 @@ class TagChoice(urwid.WidgetWrap):
         platforms_frame.body = menu
 
         container.focus_position = 1
+        display_pile.focus_position = 0
 
     def open_menu(self):
         menu = self.menu
@@ -276,30 +312,6 @@ class TagChoice(urwid.WidgetWrap):
         actual_menu = make_menu(choices)
         self.menu = weakref.ref(actual_menu)
         self._open_menu(actual_menu)
-
-    # def item_chosen(self):
-    #     header: Text = unwrap(display_frame.header)
-    #     header.set_text(f"{self.repo.name}: {self.tag}")
-    #
-    #     try:
-    #         image = self.repo.get_image(self.tag)
-    #
-    #         image_pp = ppjson(image.manifest_list)
-    #         digest_display = Text(image.manifest_list.digest, wrap=urwid.ANY)
-    #         manifest_display = Text(image_pp * 2, wrap=urwid.ANY)
-    #         display_items = [digest_display, divider, manifest_display]
-    #     except Exception as e:
-    #         display_items = [
-    #             Text("An error occurred."),
-    #             divider,
-    #             Text("{0}: {1}".format(e.__class__.__name__, str(e))),
-    #         ]
-    #
-    #     display = Pile(display_items)
-    #     platforms_frame.body = Filler(display)
-    #     layers_frame.body = Scrollable(display)
-    #
-    #     container.focus_position = 1
 
 
 class RepositoryMenu(urwid.WidgetWrap):
@@ -353,7 +365,7 @@ class NamespaceMenu(urwid.WidgetWrap):
 
     def _open_menu(self, menu):
         reset_display()
-        tags_frame.body = make_menu([])
+        tags_frame.reset()
         images_frame.body = menu
 
         header: ChangingText = unwrap(images_frame.header)
@@ -388,10 +400,14 @@ class NamespaceMenu(urwid.WidgetWrap):
 class ChangingText(Text):
     def __init__(self, markup, change_fmt, *args, **kwargs):
         super().__init__(markup, *args, **kwargs)
+        self.initial_markup = markup
         self.change_fmt = change_fmt
 
     def change_heading(self, value: str):
         self.set_text(self.change_fmt.format(value))
+
+    def reset(self):
+        self.set_text(self.initial_markup)
 
 
 class ResettableFrame(Frame):
@@ -404,22 +420,30 @@ class ResettableFrame(Frame):
 
         if header:
             header_widget: Text = unwrap(header)
-            self.orig_header_text = header_widget.text
+            if not isinstance(header_widget, ChangingText):
+                self.orig_header_text = header_widget.text
 
         if footer:
             footer_widget: Text = unwrap(footer)
-            self.orig_footer_text = footer_widget.text
+            if not isinstance(footer_widget, ChangingText):
+                self.orig_footer_text = footer_widget.text
 
     def reset(self):
         self.body = self.orig_body
 
-        if self.orig_header_text is not None:
+        if self.header:
             header_widget: Text = unwrap(self.header)
-            header_widget.set_text(self.orig_header_text)
+            if isinstance(header_widget, ChangingText):
+                header_widget.reset()
+            elif self.orig_footer_text is not None:
+                header_widget.set_text(self.orig_header_text)
 
-        if self.orig_footer_text is not None:
+        if self.footer:
             footer_widget: Text = unwrap(self.footer)
-            footer_widget.set_text(self.orig_footer_text)
+            if isinstance(footer_widget, ChangingText):
+                footer_widget.reset()
+            elif self.orig_footer_text is not None:
+                footer_widget.set_text(self.orig_footer_text)
 
 
 class PileMenu(Pile):
@@ -475,7 +499,7 @@ images_frame = Frame(
         "footer",
     ),
 )
-tags_frame = Frame(
+tags_frame = ResettableFrame(
     make_menu([]),
     header=AttrMap(
         pad_text(ChangingText("Tags", "Tags: {}")),

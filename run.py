@@ -4,10 +4,10 @@ import dataclasses
 import itertools
 import os
 import weakref
-from typing import Iterable
+from typing import Iterable, Optional
 
 from dotenv import load_dotenv
-from dreg_client import PlatformImage, Registry, Repository
+from dreg_client import Platform, PlatformImage, Registry, Repository
 from humanfriendly import format_size as base_format_size
 import simplejson as json
 
@@ -48,6 +48,13 @@ focus_map = {
 screen = urwid.raw_display.Screen()
 screen_cols, screen_rows = screen.get_cols_rows()
 
+
+preferred_platform_name = os.getenv("DREG_PREFERRED_PLATFORM")
+preferred_platform: Optional[Platform]
+if preferred_platform_name:
+    preferred_platform = Platform.from_name(preferred_platform_name)
+else:
+    preferred_platform = None
 
 dclient = Registry.build_with_manual_client(
     os.getenv("REGISTRY_URL"),
@@ -248,7 +255,20 @@ class TagChoice(urwid.WidgetWrap):
                 return
 
         image = self.repo.get_image(self.tag)
-        pimages = image.get_platform_images()
+
+        if preferred_platform:
+            pimages = []
+            preferred_pimage = None
+            for pimage in image.get_platform_images():
+                if pimage.config.platform == preferred_platform:
+                    preferred_pimage = pimage
+                else:
+                    pimages.append(pimage)
+            if preferred_pimage:
+                pimages.insert(0, preferred_pimage)
+        else:
+            pimages = image.get_platform_images()
+
         choices = [PlatformChoice(pimage) for pimage in pimages]
 
         actual_menu = make_menu(choices)

@@ -192,7 +192,7 @@ class PlatformChoice(BetterSelectableRow):
                 trim_digest(pimage.digest),
                 (format_size(image_size), urwid.RIGHT),
             ],
-            on_select=cb(self.item_chosen),
+            on_select=cb(self.open_menu),
             space_between=1,
             columns_factory=columns_factory,
             column_factory=column_factory,
@@ -201,13 +201,18 @@ class PlatformChoice(BetterSelectableRow):
         self.pimage = pimage
         self.menu = None
 
-    def item_chosen(self):
+    def _open_menu(self, menu):
+        layers_frame.body = menu
+        display_pile.focus_position = 2
+
+        # TODO: We actually need to set up columns inside of layers_frame
+
+    def open_menu(self):
         menu = self.menu
         if menu:
             actual_menu = menu()
             if actual_menu:
-                layers_frame.body = actual_menu
-                display_pile.focus_position = 2
+                self._open_menu(actual_menu)
                 return
 
         choices = [LayerChoice(self.pimage, idx) for idx, _ in enumerate(self.pimage.config.history)]
@@ -218,10 +223,7 @@ class PlatformChoice(BetterSelectableRow):
         )
 
         self.menu = weakref.ref(actual_menu)
-        layers_frame.body = actual_menu
-        display_pile.focus_position = 2
-
-        # TODO: We actually need to set up columns inside of layers_frame
+        self._open_menu(actual_menu)
 
     def layer_selection_change(self, _prev_idx, new_idx):
         pass

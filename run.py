@@ -534,7 +534,7 @@ display_pile.contents.append((
 display_frame = ResettableFrame(
     Filler(display_pile, height=screen_rows - 1),
     header=AttrMap(
-        pad_text(Text("", align=urwid.CENTER)),
+        pad_text(ChangingText("", "{}", align=urwid.CENTER)),
         "heading",
     ),
 )
